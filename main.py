@@ -2,6 +2,7 @@ from flask import Flask, request
 import requests
 import os
 import json
+import traceback
 
 app = Flask(__name__)
 
@@ -15,7 +16,8 @@ def send_telegram_message(chat_id, text):
         "chat_id": chat_id,
         "text": text
     }
-    requests.post(url, json=payload)
+    response = requests.post(url, json=payload)
+    print(f"[Telegram Response] {response.status_code} → {response.text}")
 
 def call_langflow(user_input):
     headers = {
@@ -42,25 +44,41 @@ def call_langflow(user_input):
         }
     }
 
+    print("\n--- DEBUG: Langflow Request Body ---")
+    print(json.dumps(body, indent=2))
+
     try:
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
+        print(f"\n--- DEBUG: Langflow API Status {response.status_code} ---")
+        print(response.text)
+
         if response.status_code == 200:
-            return response.json().get("result", {}).get("output", "✅ API trả về nhưng không có dữ liệu.")
+            data = response.json()
+            output = data.get("result", {}).get("output")
+            if output:
+                return output
+            else:
+                return f"⚠️ Flow chạy xong nhưng không có 'output'.\n\n{json.dumps(data, indent=2)}"
         else:
-            return f"❌ Lỗi API ({response.status_code})"
+            return f"❌ Lỗi API ({response.status_code})\n{response.text}"
     except Exception as e:
+        traceback.print_exc()
         return f"❌ Lỗi khi gọi API: {str(e)}"
 
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
+    print("\n--- DEBUG: Telegram Webhook Data ---")
+    print(json.dumps(data, indent=2))
 
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"]["text"]
 
         send_telegram_message(chat_id, "⏳ Đang xử lý...")
+
         output = call_langflow(user_text)
+
         send_telegram_message(chat_id, output)
 
     return "ok", 200
@@ -71,4 +89,5 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    print(f"🔥 Running on port {port}...")
     app.run(host="0.0.0.0", port=port)
