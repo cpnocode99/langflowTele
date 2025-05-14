@@ -72,9 +72,8 @@ def call_langflow(user_input):
     try:
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
         print(f"\n--- [DEBUG] HTTP Status: {response.status_code} ---")
-        print(f"[DEBUG] Raw Text:\n{response.text[:500]}...")  # Giới hạn hiển thị log
+        print(f"[DEBUG] Raw Text:\n{response.text[:500]}...")
 
-        # ➤ Kiểm tra lỗi khi parse JSON
         try:
             data = response.json()
         except Exception as json_err:
@@ -90,15 +89,19 @@ def call_langflow(user_input):
 
         for block in outputs:
             for out in block.get("outputs", []):
-                if isinstance(out, dict):
-                    msg = out.get("message", {}).get("text") \
-                          or out.get("text") \
-                          or json.dumps(out)
-                    messages.extend(split_long_message(str(msg)))
-                elif isinstance(out, str):
-                    messages.extend(split_long_message(out))
-                else:
-                    messages.append(str(out))
+                msg = (
+                    out.get("results", {}).get("message", {}).get("text") or
+                    out.get("outputs", {}).get("message", {}).get("message") or
+                    (
+                        out.get("messages", [{}])[0].get("message")
+                        if isinstance(out.get("messages", None), list) and out["messages"]
+                        else None
+                    ) or
+                    out.get("message", {}).get("text") or
+                    out.get("text") or
+                    json.dumps(out)
+                )
+                messages.extend(split_long_message(str(msg)))
 
         return messages if messages else ["⚠️ Không có output từ Langflow."]
     except Exception as e:
