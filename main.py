@@ -12,7 +12,6 @@ LANGFLOW_URL = "https://langflow.4h30.space/api/v1/run/210e3265-ac54-41da-82ae-a
 
 MAX_LENGTH = 4096
 
-# ✅ Hàm chia nhỏ text theo dòng, không vượt quá 4096 ký tự
 def split_long_message(text, max_length=MAX_LENGTH):
     lines = text.split('\n')
     chunks = []
@@ -30,7 +29,6 @@ def split_long_message(text, max_length=MAX_LENGTH):
 
     return chunks
 
-# ✅ Hàm gửi tin nhắn qua Telegram, chia nhỏ nếu cần
 def send_telegram_message(chat_id, text):
     if not isinstance(text, str):
         text = str(text)
@@ -43,7 +41,6 @@ def send_telegram_message(chat_id, text):
         )
         print(f"[Telegram] {response.status_code} → {response.text}")
 
-# ✅ Hàm gọi Langflow API
 def call_langflow(user_input):
     headers = {
         "Content-Type": "application/json",
@@ -74,9 +71,18 @@ def call_langflow(user_input):
 
     try:
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
-        data = response.json()
+        print(f"\n--- [DEBUG] HTTP Status: {response.status_code} ---")
+        print(f"[DEBUG] Raw Text:\n{response.text[:500]}...")  # Giới hạn hiển thị log
 
-        print("\n--- [DEBUG] Trả về từ Langflow ---")
+        # ➤ Kiểm tra lỗi khi parse JSON
+        try:
+            data = response.json()
+        except Exception as json_err:
+            print("❌ Lỗi parse JSON từ Langflow:")
+            print(response.text)
+            return [f"❌ Langflow trả về JSON không hợp lệ:\n{json_err}\n\nRaw:\n{response.text[:1000]}"]
+
+        print("\n--- [DEBUG] JSON từ Langflow ---")
         print(json.dumps(data, indent=2))
 
         outputs = data.get("outputs", [])
@@ -85,24 +91,20 @@ def call_langflow(user_input):
         for block in outputs:
             for out in block.get("outputs", []):
                 if isinstance(out, dict):
-                    msg = out.get("message", {}).get("text")
-                    if msg:
-                        messages.append(msg)
-                    elif "text" in out:
-                        messages.append(out["text"])
-                    else:
-                        messages.append(json.dumps(out))
+                    msg = out.get("message", {}).get("text") \
+                          or out.get("text") \
+                          or json.dumps(out)
+                    messages.extend(split_long_message(str(msg)))
                 elif isinstance(out, str):
-                    messages.append(out)
+                    messages.extend(split_long_message(out))
                 else:
                     messages.append(str(out))
 
-        return messages if messages else ["⚠️ Không có nội dung output nào được tìm thấy."]
+        return messages if messages else ["⚠️ Không có output từ Langflow."]
     except Exception as e:
         traceback.print_exc()
-        return [f"❌ Lỗi khi gọi Langflow: {str(e)}"]
+        return [f"❌ Lỗi khi gọi Langflow API: {str(e)}"]
 
-# ✅ Webhook nhận tin nhắn từ Telegram
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -121,12 +123,10 @@ def webhook():
 
     return "ok", 200
 
-# ✅ Endpoint kiểm tra bot sống
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Bot is running!"
 
-# ✅ Chạy local
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Running on port {port}...")
