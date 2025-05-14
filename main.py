@@ -12,12 +12,9 @@ LANGFLOW_URL = "https://langflow.4h30.space/api/v1/run/210e3265-ac54-41da-82ae-a
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    payload = {"chat_id": chat_id, "text": text}
     response = requests.post(url, json=payload)
-    print(f"[Telegram Response] {response.status_code} → {response.text}")
+    print(f"[Telegram] Status {response.status_code}: {response.text}")
 
 def call_langflow(user_input):
     headers = {
@@ -26,8 +23,8 @@ def call_langflow(user_input):
     }
 
     body = {
+        "input_type": "chat",
         "output_type": "chat",
-        "input_type": "text",
         "tweaks": {
             "TextInput-3JR1W": {
                 "input_value": user_input
@@ -44,31 +41,42 @@ def call_langflow(user_input):
         }
     }
 
-    print("\n--- DEBUG: Langflow Request Body ---")
+    print("\n--- [DEBUG] Request gửi đến Langflow ---")
     print(json.dumps(body, indent=2))
 
     try:
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
-        print(f"\n--- DEBUG: Langflow API Status {response.status_code} ---")
-        print(response.text)
+        print(f"\n--- [DEBUG] Langflow Status {response.status_code} ---")
+        data = response.json()
+        print(json.dumps(data, indent=2))
 
-        if response.status_code == 200:
-            data = response.json()
-            output = data.get("result", {}).get("output")
-            if output:
-                return output
-            else:
-                return f"⚠️ Flow chạy xong nhưng không có 'output'.\n\n{json.dumps(data, indent=2)}"
-        else:
-            return f"❌ Lỗi API ({response.status_code})\n{response.text}"
+        outputs = data.get("outputs", [])
+        messages = []
+
+        for block in outputs:
+            for out in block.get("outputs", []):
+                if isinstance(out, dict):
+                    # Ưu tiên lấy message["text"] nếu có
+                    text = out.get("message", {}).get("text")
+                    if text:
+                        messages.append(text)
+                    else:
+                        messages.append(json.dumps(out))
+                elif isinstance(out, str):
+                    messages.append(out)
+                else:
+                    messages.append(str(out))
+
+        return "\n\n---\n\n".join(messages) if messages else "⚠️ Không có nội dung output nào được tìm thấy."
+
     except Exception as e:
         traceback.print_exc()
-        return f"❌ Lỗi khi gọi API: {str(e)}"
+        return f"❌ Lỗi khi gọi Langflow API: {str(e)}"
 
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
-    print("\n--- DEBUG: Telegram Webhook Data ---")
+    print("\n--- [DEBUG] Telegram Webhook ---")
     print(json.dumps(data, indent=2))
 
     if "message" in data and "text" in data["message"]:
@@ -76,9 +84,7 @@ def webhook():
         user_text = data["message"]["text"]
 
         send_telegram_message(chat_id, "⏳ Đang xử lý...")
-
         output = call_langflow(user_text)
-
         send_telegram_message(chat_id, output)
 
     return "ok", 200
@@ -89,5 +95,5 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"🔥 Running on port {port}...")
+    print(f"🚀 Running on port {port}...")
     app.run(host="0.0.0.0", port=port)
