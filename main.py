@@ -2,7 +2,6 @@ from flask import Flask, request
 import requests
 import os
 import json
-import traceback
 
 app = Flask(__name__)
 
@@ -35,11 +34,10 @@ def send_telegram_message(chat_id, text):
 
     for chunk in split_long_message(text):
         payload = {"chat_id": chat_id, "text": chunk}
-        response = requests.post(
+        requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json=payload
         )
-        print(f"[Telegram] {response.status_code} → {response.text}")
 
 def call_langflow(user_input):
     headers = {
@@ -66,23 +64,9 @@ def call_langflow(user_input):
         }
     }
 
-    print("\n--- [DEBUG] Gửi tới Langflow ---")
-    print(json.dumps(body, indent=2))
-
     try:
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
-        print(f"\n--- [DEBUG] HTTP Status: {response.status_code} ---")
-        print(f"[DEBUG] Raw Text:\n{response.text[:500]}...")
-
-        try:
-            data = response.json()
-        except Exception as json_err:
-            print("❌ Lỗi parse JSON từ Langflow:")
-            print(response.text)
-            return [f"❌ Langflow trả về JSON không hợp lệ:\n{json_err}\n\nRaw:\n{response.text[:1000]}"]
-
-        print("\n--- [DEBUG] JSON từ Langflow ---")
-        print(json.dumps(data, indent=2))
+        data = response.json()
 
         outputs = data.get("outputs", [])
         messages = []
@@ -103,16 +87,13 @@ def call_langflow(user_input):
                 )
                 messages.extend(split_long_message(str(msg)))
 
-        return messages if messages else ["⚠️ Không có output từ Langflow."]
-    except Exception as e:
-        traceback.print_exc()
-        return [f"❌ Lỗi khi gọi Langflow API: {str(e)}"]
+        return messages if messages else ["⚠️ Không có output."]
+    except Exception:
+        return ["❌ Lỗi khi gọi Langflow hoặc xử lý dữ liệu."]
 
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
-    print("\n--- [DEBUG] Telegram Webhook ---")
-    print(json.dumps(data, indent=2))
 
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
@@ -132,5 +113,4 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Running on port {port}...")
     app.run(host="0.0.0.0", port=port)
