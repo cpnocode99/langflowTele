@@ -5,9 +5,14 @@ import json
 
 app = Flask(__name__)
 
+# 🛡️ Biến môi trường
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
-LANGFLOW_URL = "https://langflow.4h30.space/api/v1/run/210e3265-ac54-41da-82ae-aa95eebf0118?stream=false"
+LANGFLOW_URL = os.getenv("LANGFLOW_URL")  # <-- moved to env
+
+# 🔐 Kiểm tra nếu thiếu biến môi trường quan trọng
+if not LANGFLOW_URL:
+    raise RuntimeError("❌ LANGFLOW_URL is not set in environment variables.")
 
 MAX_LENGTH = 4096
 
@@ -99,11 +104,14 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"]["text"]
 
-        send_telegram_message(chat_id, "⏳ Đang xử lý...")
+        # ✅ Chỉ xử lý nếu bắt đầu bằng /ai
+        if user_text.strip().lower().startswith("/ai "):
+            cleaned_text = user_text[4:].strip()
 
-        outputs = call_langflow(user_text)
-        for message in outputs:
-            send_telegram_message(chat_id, message)
+            send_telegram_message(chat_id, "⏳ Đang xử lý...")
+            outputs = call_langflow(cleaned_text)
+            for message in outputs:
+                send_telegram_message(chat_id, message)
 
     return "ok", 200
 
