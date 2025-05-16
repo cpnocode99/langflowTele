@@ -5,43 +5,36 @@ import json
 
 app = Flask(__name__)
 
-# 🛡️ Biến môi trường
+# ENV
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
-LANGFLOW_URL = os.getenv("LANGFLOW_URL")  # <-- moved to env
+LANGFLOW_URL = os.getenv("LANGFLOW_URL")
 
-# 🔐 Kiểm tra nếu thiếu biến môi trường quan trọng
 if not LANGFLOW_URL:
-    raise RuntimeError("❌ LANGFLOW_URL is not set in environment variables.")
+    raise RuntimeError("❌ LANGFLOW_URL is not set.")
 
 MAX_LENGTH = 4096
 
 def split_long_message(text, max_length=MAX_LENGTH):
     lines = text.split('\n')
-    chunks = []
-    current_chunk = ""
-
+    chunks, chunk = [], ""
     for line in lines:
-        if len(current_chunk) + len(line) + 1 <= max_length:
-            current_chunk += line + "\n"
+        if len(chunk) + len(line) + 1 <= max_length:
+            chunk += line + "\n"
         else:
-            chunks.append(current_chunk.strip())
-            current_chunk = line + "\n"
-
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-
+            chunks.append(chunk.strip())
+            chunk = line + "\n"
+    if chunk:
+        chunks.append(chunk.strip())
     return chunks
 
 def send_telegram_message(chat_id, text):
     if not isinstance(text, str):
         text = str(text)
-
     for chunk in split_long_message(text):
-        payload = {"chat_id": chat_id, "text": chunk}
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json=payload
+            json={"chat_id": chat_id, "text": chunk}
         )
 
 def call_langflow(user_input):
@@ -54,7 +47,7 @@ def call_langflow(user_input):
         "input_type": "chat",
         "output_type": "chat",
         "tweaks": {
-            "TextInput-3JR1W": {
+            "TextInput-xpmxA": {
                 "input_value": user_input
             },
             "Agent-Xxy8r": {
@@ -78,19 +71,27 @@ def call_langflow(user_input):
 
         for block in outputs:
             for out in block.get("outputs", []):
-                msg = (
-                    out.get("results", {}).get("message", {}).get("text") or
-                    out.get("outputs", {}).get("message", {}).get("message") or
-                    (
-                        out.get("messages", [{}])[0].get("message")
-                        if isinstance(out.get("messages", None), list) and out["messages"]
-                        else None
-                    ) or
-                    out.get("message", {}).get("text") or
-                    out.get("text") or
-                    json.dumps(out)
-                )
-                messages.extend(split_long_message(str(msg)))
+                candidates = []
+
+                # All possible message formats
+                if out.get("results", {}).get("message", {}).get("text"):
+                    candidates.append(out["results"]["message"]["text"])
+                if out.get("outputs", {}).get("message", {}).get("message"):
+                    candidates.append(out["outputs"]["message"]["message"])
+                if out.get("message", {}).get("text"):
+                    candidates.append(out["message"]["text"])
+                if out.get("text"):
+                    candidates.append(out["text"])
+                if out.get("messages"):
+                    for m in out["messages"]:
+                        if m.get("message"):
+                            candidates.append(m["message"])
+
+                if not candidates:
+                    candidates.append(json.dumps(out))
+
+                for msg in candidates:
+                    messages.extend(split_long_message(str(msg)))
 
         return messages if messages else ["⚠️ Không có output."]
     except Exception:
@@ -99,19 +100,16 @@ def call_langflow(user_input):
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"]["text"]
 
-        # ✅ Chỉ xử lý nếu bắt đầu bằng /ai
-        if user_text.strip().lower().startswith("/ai "):
-            cleaned_text = user_text[4:].strip()
-
+        if user_text.lower().strip().startswith("/ai "):
+            user_query = user_text[4:].strip()
             send_telegram_message(chat_id, "⏳ Đang xử lý...")
-            outputs = call_langflow(cleaned_text)
-            for message in outputs:
-                send_telegram_message(chat_id, message)
+            results = call_langflow(user_query)
+            for msg in results:
+                send_telegram_message(chat_id, msg)
 
     return "ok", 200
 
