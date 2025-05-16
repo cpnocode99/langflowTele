@@ -5,7 +5,7 @@ import json
 
 app = Flask(__name__)
 
-# ENV
+# Load environment variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
 LANGFLOW_URL = os.getenv("LANGFLOW_URL")
@@ -63,43 +63,60 @@ def call_langflow(user_input):
     }
 
     try:
-        response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
-        data = response.json()
+        print("\n--- [DEBUG] Gửi tới Langflow ---")
+        print(json.dumps(body, indent=2, ensure_ascii=False))
 
+        response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
+        print(f"--- [DEBUG] HTTP Status: {response.status_code} ---")
+        raw_text = response.text
+        print("[DEBUG] Raw Text:\n", raw_text[:2000], "..." if len(raw_text) > 2000 else "")
+
+        data = response.json()
         outputs = data.get("outputs", [])
-        messages = []
+        all_messages = set()
 
         for block in outputs:
             for out in block.get("outputs", []):
                 candidates = []
 
-                # All possible message formats
-                if out.get("results", {}).get("message", {}).get("text"):
-                    candidates.append(out["results"]["message"]["text"])
-                if out.get("outputs", {}).get("message", {}).get("message"):
-                    candidates.append(out["outputs"]["message"]["message"])
-                if out.get("message", {}).get("text"):
-                    candidates.append(out["message"]["text"])
-                if out.get("text"):
-                    candidates.append(out["text"])
-                if out.get("messages"):
-                    for m in out["messages"]:
-                        if m.get("message"):
-                            candidates.append(m["message"])
+                for key_path in [
+                    ("results", "message", "text"),
+                    ("outputs", "message", "message"),
+                    ("message", "text"),
+                    ("text",),
+                ]:
+                    ref = out
+                    for key in key_path:
+                        ref = ref.get(key, {})
+                    if isinstance(ref, str):
+                        candidates.append(ref)
 
-                if not candidates:
-                    candidates.append(json.dumps(out))
+                for m in out.get("messages", []):
+                    msg = m.get("message")
+                    if msg and isinstance(msg, str):
+                        candidates.append(msg)
 
                 for msg in candidates:
-                    messages.extend(split_long_message(str(msg)))
+                    cleaned = msg.strip()
+                    if cleaned:
+                        all_messages.add(cleaned)
 
-        return messages if messages else ["⚠️ Không có output."]
-    except Exception:
-        return ["❌ Lỗi khi gọi Langflow hoặc xử lý dữ liệu."]
+        print("\n--- [DEBUG] Trả về từ Langflow ---")
+        for i, msg in enumerate(all_messages, 1):
+            print(f"[{i}] {msg}")
+        print("--- [END DEBUG] ---\n")
+
+        return split_long_message("\n\n---\n\n".join(all_messages)) if all_messages else ["⚠️ Không có output."]
+    except Exception as e:
+        print("❌ Lỗi xử lý Langflow:", e)
+        return [f"❌ Lỗi: {str(e)}"]
 
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
+    print("\n--- [DEBUG] Telegram Webhook ---")
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"]["text"]
@@ -107,8 +124,8 @@ def webhook():
         if user_text.lower().strip().startswith("/ai "):
             user_query = user_text[4:].strip()
             send_telegram_message(chat_id, "⏳ Đang xử lý...")
-            results = call_langflow(user_query)
-            for msg in results:
+            responses = call_langflow(user_query)
+            for msg in responses:
                 send_telegram_message(chat_id, msg)
 
     return "ok", 200
