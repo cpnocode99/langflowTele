@@ -11,7 +11,10 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LANGFLOW_URL = os.getenv("LANGFLOW_URL")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # ID để gửi tự động lúc 8h sáng
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Dùng để lưu gợi ý cho từng chat_id
+last_suggestion_map = {}
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -29,12 +32,18 @@ def send_multiple_telegram_messages(chat_id, messages):
     print(f"[LOG] Gửi {len(messages)} tin nhắn tới Telegram")
     for msg in messages:
         send_telegram_message(chat_id, msg)
+        if "Bạn có muốn biết thêm:" in msg:
+            try:
+                suggestion = msg.split("Bạn có muốn biết thêm:")[-1].strip().strip('"“”')
+                if suggestion:
+                    last_suggestion_map[chat_id] = suggestion
+                    print(f"[LOG] Lưu gợi ý cho chat_id={chat_id}: {suggestion}")
+            except Exception as e:
+                print("[ERROR] Khi phân tích gợi ý:", str(e))
 
 def extract_all_text_outputs(outputs):
-    print("[LOG] Trích xuất kết quả từ Langflow")
     seen = set()
     results = []
-
     for i, output_block in enumerate(outputs):
         for sub in output_block.get("outputs", []):
             message = (
@@ -47,7 +56,6 @@ def extract_all_text_outputs(outputs):
                 print(f"[DEBUG] Output {i}: {message}")
                 results.append(message)
                 seen.add(message)
-
     return results if results else ["✅ Langflow không trả về nội dung phù hợp."]
 
 def call_langflow(user_input):
@@ -100,24 +108,42 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         print(f"[LOG] Nhận tin nhắn từ user: {user_text} (chat_id={chat_id})")
 
-        if user_text.lower().startswith("/ai"):
-            actual_text = user_text[3:].strip()
-            print(f"[LOG] Xử lý lệnh /ai với nội dung: {actual_text}")
-            send_telegram_message(chat_id, "⏳ Đang xử lý...")
-            messages = call_langflow(actual_text)
-            send_multiple_telegram_messages(chat_id, messages)
+        clean_text = user_text.strip().lower()
 
-        elif user_text.lower().startswith("/ques"):
-            try:
-                num = int(user_text[5:].strip())
+        # /ok
+        if clean_text == "/ok":
+            suggestion = last_suggestion_map.get(chat_id)
+            if suggestion:
+                print(f"[LOG] Xử lý lệnh /ok với gợi ý: {suggestion}")
+                send_telegram_message(chat_id, "⏳ Đang xử lý gợi ý trước đó...")
+                messages = call_langflow(suggestion)
+                send_multiple_telegram_messages(chat_id, messages)
+            else:
+                send_telegram_message(chat_id, "⚠️ Không có gợi ý nào để xử lý. Hãy gửi câu hỏi trước.")
+            return "ok", 200
+
+        # /ques 5
+        elif clean_text.startswith("/ques"):
+            parts = user_text.strip().split()
+            if len(parts) == 2 and parts[1].isdigit():
+                num = int(parts[1])
                 input_text = f"Hãy đặt {num} câu hỏi hợp lệ đi"
                 print(f"[LOG] Xử lý lệnh /ques với số lượng: {num}")
                 send_telegram_message(chat_id, "⏳ Đang xử lý...")
                 messages = call_langflow(input_text)
                 send_multiple_telegram_messages(chat_id, messages)
-            except ValueError:
-                print("[ERROR] Sai định dạng lệnh /ques")
-                send_telegram_message(chat_id, "❌ Sai cú pháp! Dùng /ques {số}")
+            else:
+                send_telegram_message(chat_id, "❌ Sai cú pháp! Dùng đúng định dạng: /ques {số}")
+            return "ok", 200
+
+        # /ai nội dung
+        elif clean_text.startswith("/ai"):
+            actual_text = user_text[3:].strip()
+            print(f"[LOG] Xử lý lệnh /ai với nội dung: {actual_text}")
+            send_telegram_message(chat_id, "⏳ Đang xử lý...")
+            messages = call_langflow(actual_text)
+            send_multiple_telegram_messages(chat_id, messages)
+            return "ok", 200
 
     return "ok", 200
 
@@ -142,7 +168,7 @@ def run_schedule():
         schedule.run_pending()
         time.sleep(60)
 
-# Chạy luồng định kỳ
+# Khởi động lịch chạy định kỳ
 threading.Thread(target=run_schedule, daemon=True).start()
 
 if __name__ == "__main__":
