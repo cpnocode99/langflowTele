@@ -5,37 +5,38 @@ import json
 
 app = Flask(__name__)
 
-# Load environment variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
 LANGFLOW_URL = os.getenv("LANGFLOW_URL")
-
-if not LANGFLOW_URL:
-    raise RuntimeError("❌ LANGFLOW_URL is not set.")
-
-MAX_LENGTH = 4096
-
-def split_long_message(text, max_length=MAX_LENGTH):
-    lines = text.split('\n')
-    chunks, chunk = [], ""
-    for line in lines:
-        if len(chunk) + len(line) + 1 <= max_length:
-            chunk += line + "\n"
-        else:
-            chunks.append(chunk.strip())
-            chunk = line + "\n"
-    if chunk:
-        chunks.append(chunk.strip())
-    return chunks
+LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
 
 def send_telegram_message(chat_id, text):
-    if not isinstance(text, str):
-        text = str(text)
-    for chunk in split_long_message(text):
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": chat_id, "text": chunk}
-        )
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print("[ERROR] Gửi tin nhắn Telegram:", str(e))
+
+def extract_all_text_outputs(outputs):
+    seen = set()
+    results = []
+
+    for i, output_block in enumerate(outputs):
+        for sub in output_block.get("outputs", []):
+            message = (
+                sub.get("results", {})
+                   .get("message", {})
+                   .get("text", "")
+                   .strip()
+            )
+            if message and message not in seen:
+                results.append(message)
+                seen.add(message)
+
+    return results if results else ["✅ Langflow không trả về nội dung phù hợp."]
 
 def call_langflow(user_input):
     headers = {
@@ -44,8 +45,8 @@ def call_langflow(user_input):
     }
 
     body = {
-        "input_type": "chat",
         "output_type": "chat",
+        "input_type": "text",
         "tweaks": {
             "TextInput-xpmxA": {
                 "input_value": user_input
@@ -63,70 +64,34 @@ def call_langflow(user_input):
     }
 
     try:
-        print("\n--- [DEBUG] Gửi tới Langflow ---")
-        print(json.dumps(body, indent=2, ensure_ascii=False))
-
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
-        print(f"--- [DEBUG] HTTP Status: {response.status_code} ---")
-        raw_text = response.text
-        print("[DEBUG] Raw Text:\n", raw_text[:2000], "..." if len(raw_text) > 2000 else "")
-
-        data = response.json()
-        outputs = data.get("outputs", [])
-        all_messages = set()
-
-        for block in outputs:
-            for out in block.get("outputs", []):
-                candidates = []
-
-                for key_path in [
-                    ("results", "message", "text"),
-                    ("outputs", "message", "message"),
-                    ("message", "text"),
-                    ("text",),
-                ]:
-                    ref = out
-                    for key in key_path:
-                        ref = ref.get(key, {})
-                    if isinstance(ref, str):
-                        candidates.append(ref)
-
-                for m in out.get("messages", []):
-                    msg = m.get("message")
-                    if msg and isinstance(msg, str):
-                        candidates.append(msg)
-
-                for msg in candidates:
-                    cleaned = msg.strip()
-                    if cleaned:
-                        all_messages.add(cleaned)
-
-        print("\n--- [DEBUG] Trả về từ Langflow ---")
-        for i, msg in enumerate(all_messages, 1):
-            print(f"[{i}] {msg}")
-        print("--- [END DEBUG] ---\n")
-
-        return split_long_message("\n\n---\n\n".join(all_messages)) if all_messages else ["⚠️ Không có output."]
+        if response.status_code == 200:
+            data = response.json()
+            return extract_all_text_outputs(data.get("outputs", []))
+        else:
+            return [f"❌ Lỗi API ({response.status_code})"]
     except Exception as e:
-        print("❌ Lỗi xử lý Langflow:", e)
-        return [f"❌ Lỗi: {str(e)}"]
+        return [f"❌ Lỗi khi gọi API: {str(e)}"]
+
+def send_multiple_telegram_messages(chat_id, messages):
+    for msg in messages:
+        send_telegram_message(chat_id, msg)
 
 @app.route(f"/webhook/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
-    print("\n--- [DEBUG] Telegram Webhook ---")
+    print("--- [DEBUG] Telegram Webhook ---")
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     if "message" in data and "text" in data["message"]:
-        chat_id = data["message"]["chat"]["id"]
         user_text = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
 
-        if user_text.lower().strip().startswith("/ai "):
-            user_query = user_text[4:].strip()
+        if user_text.lower().startswith("/ai"):
+            actual_text = user_text[3:].strip()
             send_telegram_message(chat_id, "⏳ Đang xử lý...")
-            responses = call_langflow(user_query)
-            for msg in responses:
-                send_telegram_message(chat_id, msg)
+            messages = call_langflow(actual_text)
+            send_multiple_telegram_messages(chat_id, messages)
 
     return "ok", 200
 
