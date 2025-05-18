@@ -2,9 +2,9 @@ from flask import Flask, request
 import requests
 import os
 import json
-import threading
-import schedule
-import time
+# import threading
+# import schedule
+# import time
 
 app = Flask(__name__)
 
@@ -13,8 +13,8 @@ LANGFLOW_URL = os.getenv("LANGFLOW_URL")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-last_suggestion_map = {}  # Lưu gợi ý từng chat_id
-call_langflow_count = 0   # Tổng số lần gửi input
+last_suggestion_map = {}
+call_langflow_count = 0
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -155,24 +155,27 @@ def home():
 def get_count():
     return f"Tổng số lần gửi input tới Langflow: {call_langflow_count}", 200
 
-def job_daily_morning():
-    print("[LOG] 🔁 Đang chạy job định kỳ (test mỗi phút)")
-    if TELEGRAM_CHAT_ID:
-        input_text = "Hãy đặt 5 câu hỏi hợp lệ đi"
-        print(f"[LOG] [AUTO] Gửi input tự động: {input_text}")
-        messages = call_langflow(input_text)
-        send_multiple_telegram_messages(TELEGRAM_CHAT_ID, messages)
-    else:
-        print("[WARNING] ❌ TELEGRAM_CHAT_ID không được thiết lập.")
+# ==== TẠM THỜI TẮT TỰ ĐỘNG GỬI ==== #
 
-def run_schedule():
-    print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi")
-    schedule.every(1).minutes.do(job_daily_morning)  # test mỗi phút
-    while True:
-        schedule.run_pending()
-        time.sleep(5)
+# def job_daily_morning():
+#     print("[LOG] 🔁 Đang chạy job định kỳ (test mỗi phút)")
+#     if TELEGRAM_CHAT_ID:
+#         input_text = "Hãy đặt 5 câu hỏi hợp lệ đi"
+#         print(f"[LOG] [AUTO] Gửi input tự động: {input_text}")
+#         messages = call_langflow(input_text)
+#         send_multiple_telegram_messages(TELEGRAM_CHAT_ID, messages)
+#         print(f"[LOG] ✅ Đã gửi câu hỏi tự động đến chat_id={TELEGRAM_CHAT_ID}")
+#     else:
+#         print("[WARNING] ❌ TELEGRAM_CHAT_ID không được thiết lập.")
 
-threading.Thread(target=run_schedule, daemon=True).start()
+# def run_schedule():
+#     print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi")
+#     schedule.every(1).minutes.do(job_daily_morning)
+#     while True:
+#         schedule.run_pending()
+#         time.sleep(5)
+
+# threading.Thread(target=run_schedule, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
