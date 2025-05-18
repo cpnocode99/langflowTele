@@ -13,8 +13,8 @@ LANGFLOW_URL = os.getenv("LANGFLOW_URL")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Dùng để lưu gợi ý cho từng chat_id
-last_suggestion_map = {}
+last_suggestion_map = {}  # Lưu gợi ý từng chat_id
+call_langflow_count = 0   # Tổng số lần gửi input
 
 def send_telegram_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -59,6 +59,7 @@ def extract_all_text_outputs(outputs):
     return results if results else ["✅ Langflow không trả về nội dung phù hợp."]
 
 def call_langflow(user_input):
+    global call_langflow_count
     headers = {
         "Content-Type": "application/json",
         "x-api-key": LANGFLOW_API_KEY
@@ -85,6 +86,8 @@ def call_langflow(user_input):
 
     print("[LOG] Gửi yêu cầu đến Langflow với input:", user_input)
     try:
+        call_langflow_count += 1
+        print(f"[LOG] Tổng số lần gửi input tới Langflow: {call_langflow_count}")
         response = requests.post(LANGFLOW_URL, headers=headers, data=json.dumps(body))
         print(f"[LOG] Langflow response status: {response.status_code}")
         if response.status_code == 200:
@@ -110,7 +113,6 @@ def webhook():
 
         clean_text = user_text.strip().lower()
 
-        # /ok
         if clean_text == "/ok":
             suggestion = last_suggestion_map.get(chat_id)
             if suggestion:
@@ -122,7 +124,6 @@ def webhook():
                 send_telegram_message(chat_id, "⚠️ Không có gợi ý nào để xử lý. Hãy gửi câu hỏi trước.")
             return "ok", 200
 
-        # /ques 5
         elif clean_text.startswith("/ques"):
             parts = user_text.strip().split()
             if len(parts) == 2 and parts[1].isdigit():
@@ -136,7 +137,6 @@ def webhook():
                 send_telegram_message(chat_id, "❌ Sai cú pháp! Dùng đúng định dạng: /ques {số}")
             return "ok", 200
 
-        # /ai nội dung
         elif clean_text.startswith("/ai"):
             actual_text = user_text[3:].strip()
             print(f"[LOG] Xử lý lệnh /ai với nội dung: {actual_text}")
@@ -149,26 +149,29 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    print("[LOG] Gọi endpoint / kiểm tra bot")
-    return "✅ Bot is running!"
+    return "✅ Bot is running!", 200
+
+@app.route("/count", methods=["GET"])
+def get_count():
+    return f"Tổng số lần gửi input tới Langflow: {call_langflow_count}", 200
 
 def job_daily_morning():
-    print("[LOG] Chạy job tự động lúc 8h sáng")
+    print("[LOG] 🔁 Đang chạy job định kỳ (test mỗi phút)")
     if TELEGRAM_CHAT_ID:
         input_text = "Hãy đặt 5 câu hỏi hợp lệ đi"
+        print(f"[LOG] [AUTO] Gửi input tự động: {input_text}")
         messages = call_langflow(input_text)
         send_multiple_telegram_messages(TELEGRAM_CHAT_ID, messages)
     else:
-        print("[WARNING] TELEGRAM_CHAT_ID không được thiết lập.")
+        print("[WARNING] ❌ TELEGRAM_CHAT_ID không được thiết lập.")
 
 def run_schedule():
-    schedule.every().day.at("08:00").do(job_daily_morning)
-    print("[LOG] Đã lập lịch job lúc 08:00 mỗi ngày")
+    print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi")
+    schedule.every(1).minutes.do(job_daily_morning)  # test mỗi phút
     while True:
         schedule.run_pending()
-        time.sleep(60)
+        time.sleep(5)
 
-# Khởi động lịch chạy định kỳ
 threading.Thread(target=run_schedule, daemon=True).start()
 
 if __name__ == "__main__":
