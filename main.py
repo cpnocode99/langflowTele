@@ -145,6 +145,18 @@ def webhook():
             send_multiple_telegram_messages(chat_id, messages)
             return "ok", 200
 
+        elif clean_text == "/schedule":
+            print("[LOG] Nhận lệnh /schedule từ Telegram")
+            send_telegram_message(chat_id, "⚙️ Đang kích hoạt gửi câu hỏi như lúc 8h sáng...")
+
+            notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
+            input_text = "Hãy đặt 5 câu hỏi hợp lệ"
+
+            send_telegram_message(chat_id, notify_msg)
+            messages = call_langflow(input_text)
+            send_multiple_telegram_messages(chat_id, messages)
+            return "ok", 200
+
     return "ok", 200
 
 @app.route("/", methods=["GET"])
@@ -160,8 +172,6 @@ def manual_schedule_trigger():
     print("[LOG] ⚡ Kích hoạt thủ công job gửi 5 câu hỏi")
     job_daily_morning()
     return "✅ Đã kích hoạt gửi câu hỏi thủ công", 200
-
-# ==== GỬI THEO LỊCH 8H SÁNG ==== #
 
 def job_daily_morning():
     print("[LOG] 🔁 Đang chạy job định kỳ lúc 8h sáng")
