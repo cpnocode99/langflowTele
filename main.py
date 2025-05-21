@@ -139,15 +139,42 @@ def webhook():
 
         elif clean_text.startswith("/ai"):
             actual_text = user_text[3:].strip()
-            print(f"[LOG] Xử lý lệnh /ai với nội dung: {actual_text}")
+
+            if "reply_to_message" in data["message"]:
+                replied_text = data["message"]["reply_to_message"].get("text", "").strip()
+                print(f"[LOG] Lệnh /ai có reply: '{replied_text}'")
+
+                combined_prompt = f"{actual_text}\n(Phản hồi từ người dùng: {actual_text})\n(Tin nhắn được reply: {replied_text})"
+            else:
+                combined_prompt = actual_text
+
+            print(f"[LOG] Xử lý lệnh /ai với nội dung: {combined_prompt}")
             send_telegram_message(chat_id, "⏳ Đang xử lý...")
-            messages = call_langflow(actual_text)
+            messages = call_langflow(combined_prompt)
+            send_multiple_telegram_messages(chat_id, messages)
+            return "ok", 200
+
+        elif clean_text.startswith("/rep"):
+            actual_text = user_text[4:].strip()
+
+            if "reply_to_message" in data["message"]:
+                replied_text = data["message"]["reply_to_message"].get("text", "").strip()
+                print(f"[LOG] Lệnh /rep reply tới: '{replied_text}'")
+
+                combined_prompt = f"{actual_text} [phản hồi từ] {replied_text}"
+            else:
+                send_telegram_message(chat_id, "⚠️ Bạn cần reply một tin nhắn để dùng /rep.")
+                return "ok", 200
+
+            print(f"[LOG] Gửi vào Langflow: {combined_prompt}")
+            send_telegram_message(chat_id, "⏳ Đang xử lý phản hồi...")
+            messages = call_langflow(combined_prompt)
             send_multiple_telegram_messages(chat_id, messages)
             return "ok", 200
 
         elif clean_text == "/schedule":
             print("[LOG] Nhận lệnh /schedule từ Telegram")
-            send_telegram_message(chat_id, "⚙️ Đang kích hoạt gửi câu hỏi như lúc 8h sáng...")
+            send_telegram_message(chat_id, "⚙️ Đang kích hoạt gửi câu hỏi như lúc 10:30 sáng...")
 
             notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
             input_text = "Hãy đặt 5 câu hỏi hợp lệ"
@@ -174,7 +201,7 @@ def manual_schedule_trigger():
     return "✅ Đã kích hoạt gửi câu hỏi thủ công", 200
 
 def job_daily_morning():
-    print("[LOG] 🔁 Đang chạy job định kỳ lúc 8h sáng")
+    print("[LOG] 🔁 Đang chạy job định kỳ lúc 10:30 sáng")
     if TELEGRAM_CHAT_ID:
         notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
         input_text = "Hãy đặt 5 câu hỏi hợp lệ"
@@ -189,8 +216,10 @@ def job_daily_morning():
         print("[WARNING] ❌ TELEGRAM_CHAT_ID không được thiết lập.")
 
 def run_schedule():
-    print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi 8h sáng hàng ngày")
-    schedule.every().day.at("08:00").do(job_daily_morning)
+    import datetime
+    print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi")
+    print(f"[DEBUG] Giờ hệ thống (UTC): {datetime.datetime.utcnow()}")
+    schedule.every().day.at("03:30").do(job_daily_morning)  # 10:30 sáng VN = 03:30 UTC
     while True:
         schedule.run_pending()
         time.sleep(5)
