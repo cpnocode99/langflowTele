@@ -5,6 +5,7 @@ import json
 import threading
 import schedule
 import time
+import re
 
 app = Flask(__name__)
 
@@ -159,8 +160,11 @@ def webhook():
 
             if "reply_to_message" in data["message"]:
                 replied_text = data["message"]["reply_to_message"].get("text", "").strip()
-                print(f"[LOG] Lệnh /rep reply tới: '{replied_text}'")
 
+                # ✅ Loại bỏ mọi bot command ở đầu dòng
+                replied_text = re.sub(r"^/\w+\s*", "", replied_text)
+
+                print(f"[LOG] Lệnh /rep reply tới: '{replied_text}'")
                 combined_prompt = f"{actual_text} [phản hồi từ] {replied_text}"
             else:
                 send_telegram_message(chat_id, "⚠️ Bạn cần reply một tin nhắn để dùng /rep.")
@@ -174,7 +178,7 @@ def webhook():
 
         elif clean_text == "/schedule":
             print("[LOG] Nhận lệnh /schedule từ Telegram")
-            send_telegram_message(chat_id, "⚙️ Đang kích hoạt gửi câu hỏi như lúc 10:30 sáng...")
+            send_telegram_message(chat_id, "⚙️ Đang kích hoạt gửi câu hỏi như lúc 8:00 sáng...")
 
             notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
             input_text = "Hãy đặt 5 câu hỏi hợp lệ"
@@ -201,7 +205,7 @@ def manual_schedule_trigger():
     return "✅ Đã kích hoạt gửi câu hỏi thủ công", 200
 
 def job_daily_morning():
-    print("[LOG] 🔁 Đang chạy job định kỳ lúc 10:30 sáng")
+    print("[LOG] 🔁 Đang chạy job định kỳ lúc 8:00 sáng")
     if TELEGRAM_CHAT_ID:
         notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
         input_text = "Hãy đặt 5 câu hỏi hợp lệ"
@@ -219,7 +223,7 @@ def run_schedule():
     import datetime
     print("[LOG] ⚙️ Khởi động thread định kỳ gửi câu hỏi")
     print(f"[DEBUG] Giờ hệ thống (UTC): {datetime.datetime.utcnow()}")
-    schedule.every().day.at("03:30").do(job_daily_morning)  # 10:30 sáng VN = 03:30 UTC
+    schedule.every().day.at("01:00").do(job_daily_morning)  # 8:00 sáng VN = 01:00 UTC
     while True:
         schedule.run_pending()
         time.sleep(5)
