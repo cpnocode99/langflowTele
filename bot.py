@@ -2,8 +2,10 @@ import os
 import json
 import re
 import io
+import threading
 import requests
 import discord
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from discord.ext import commands
 
 # === ENV ===
@@ -182,5 +184,20 @@ async def schedule(ctx):
 @bot.command()
 async def count(ctx):
     await ctx.send(f"Tổng số lần gửi input tới Langflow: {call_langflow_count}")
+
+# === FAKE WEB SERVER FOR RENDER ===
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'✅ Discord bot is running!')
+
+def run_fake_web_server():
+    port = int(os.environ.get("PORT", 5000))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    print(f"[LOG] Mở cổng giả lập tại PORT {port} cho Render")
+    server.serve_forever()
+
+threading.Thread(target=run_fake_web_server, daemon=True).start()
 
 bot.run(DISCORD_BOT_TOKEN)
