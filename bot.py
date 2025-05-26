@@ -190,7 +190,8 @@ class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b'✅ Discord bot is running!')
+        self.wfile.write("✅ Discord bot is running!".encode("utf-8"))
+
 
 def run_fake_web_server():
     port = int(os.environ.get("PORT", 5000))
