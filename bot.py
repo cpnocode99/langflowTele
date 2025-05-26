@@ -16,6 +16,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+# === STATE ===
+last_suggestion_map = {}
+call_langflow_count = 0
+
 # === LANGFLOW ===
 def extract_all_text_outputs(outputs):
     seen = set()
@@ -29,6 +33,8 @@ def extract_all_text_outputs(outputs):
     return results if results else ["✅ Langflow không trả về nội dung phù hợp."]
 
 def call_langflow(user_input):
+    global call_langflow_count
+    call_langflow_count += 1
     headers = {
         "Content-Type": "application/json",
         "x-api-key": LANGFLOW_API_KEY
@@ -103,6 +109,12 @@ async def ai(ctx, *, prompt):
     result = call_langflow(prompt)
     for r in result:
         await ctx.send(r)
+        if "Bạn có muốn biết thêm:" in r:
+            try:
+                suggestion = r.split("Bạn có muốn biết thêm:")[-1].strip().strip('"“”')
+                if suggestion:
+                    last_suggestion_map[ctx.channel.id] = suggestion
+            except: pass
 
 @bot.command()
 async def rep(ctx, *, text):
@@ -134,5 +146,41 @@ async def chart(ctx):
                 await ctx.send(msg)
     else:
         await ctx.send("⚠️ Bạn cần reply một tin nhắn có dữ liệu.")
+
+@bot.command()
+async def ok(ctx):
+    suggestion = last_suggestion_map.get(ctx.channel.id)
+    if suggestion:
+        await ctx.send("⏳ Đang xử lý gợi ý trước đó...")
+        result = call_langflow(suggestion)
+        for r in result:
+            await ctx.send(r)
+    else:
+        await ctx.send("⚠️ Không có gợi ý nào để xử lý.")
+
+@bot.command()
+async def ques(ctx, count: int):
+    if count <= 0:
+        await ctx.send("❌ Số câu hỏi phải lớn hơn 0.")
+        return
+    await ctx.send(f"⏳ Đang tạo {count} câu hỏi...")
+    prompt = f"Hãy đặt {count} câu hỏi hợp lệ đi"
+    result = call_langflow(prompt)
+    for r in result:
+        await ctx.send(r)
+
+@bot.command()
+async def schedule(ctx):
+    await ctx.send("⚙️ Đang kích hoạt gửi câu hỏi như lúc 8:00 sáng...")
+    notify_msg = "🤖 AI đang tự động khám phá 5 câu hỏi từ dữ liệu của bạn..."
+    input_text = "Hãy đặt 5 câu hỏi hợp lệ"
+    await ctx.send(notify_msg)
+    result = call_langflow(input_text)
+    for msg in result:
+        await ctx.send(msg)
+
+@bot.command()
+async def count(ctx):
+    await ctx.send(f"Tổng số lần gửi input tới Langflow: {call_langflow_count}")
 
 bot.run(DISCORD_BOT_TOKEN)
